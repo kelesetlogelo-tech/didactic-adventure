@@ -15,6 +15,8 @@ class MultiplayerIfIWereGame {
             currentTarget: 0,
             playerAnswers: {},
             scores: {},
+            guesses: {},
+            reveal: null, // { target, answers, scores, until }
             gameStarted: false
         };
         
@@ -208,6 +210,7 @@ Just give them the room code: ${this.gameState.roomCode}
                 this.gameState.playerAnswers = newState.playerAnswers || {};
                 this.gameState.phase = newState.phase || this.gameState.phase;
                 this.gameState.maxPlayers = newState.maxPlayers || this.gameState.maxPlayers;
+                this.gameState.reveal = newState.reveal || null;
                 
                 console.log(`👥 Player count: ${oldPlayerCount} -> ${this.gameState.players.length}`);
                 console.log('👑 Is host:', this.gameState.isHost);
@@ -223,6 +226,11 @@ Just give them the room code: ${this.gameState.roomCode}
                     this.showAnswerPhase();
                 } else if (this.gameState.phase === 'guessing') {
                     this.showGuessingPhase();
+                    if (this.gameState.reveal) {
+                        this.showRoundOverlay(this.gameState.reveal);
+                    } else {
+                        this.hideRoundOverlay();
+                    }
                 }
             } else {
                 console.log('❌ No state received from Firebase');
@@ -396,10 +404,10 @@ Just give them the room code: ${this.gameState.roomCode}
         
         // Check if all players have answered
         if (Object.keys(this.gameState.playerAnswers).length === this.gameState.players.length) {
-            // All players have answered, move to guessing phase
+            // All players have answered, move to guessing phase (round-based by target)
             this.gameState.phase = 'guessing';
-            this.gameState.currentGuesser = 0;
-            this.gameState.currentTarget = 1; // Skip self
+            this.gameState.currentTarget = 0; // Start with the first player as target
+            this.gameState.guesses = {}; // Reset guesses map: { [targetName]: { [guesserName]: answers } }
         }
         
         await this.saveGameState();
@@ -414,92 +422,209 @@ Just give them the room code: ${this.gameState.roomCode}
     showGuessingPhase() {
         this.showPhase('guessing-phase');
         this.updateGuessingPhase();
+        if (this.gameState.reveal) {
+            this.showRoundOverlay(this.gameState.reveal);
+        } else {
+            this.hideRoundOverlay();
+        }
     }
 
     updateGuessingPhase() {
-        const currentGuesser = this.gameState.players[this.gameState.currentGuesser];
         const targetPlayer = this.gameState.players[this.gameState.currentTarget];
-        const isMyTurn = currentGuesser.name === this.gameState.playerName;
-        
+        if (!targetPlayer) {
+            console.log('⚠️ No target player found for currentTarget=', this.gameState.currentTarget);
+            return;
+        }
+        const me = this.gameState.playerName;
+        const myScore = this.gameState.scores[me] || 0;
+
         document.getElementById('target-player-name').textContent = targetPlayer.name;
-        document.getElementById('current-score').textContent = this.gameState.scores[this.gameState.playerName] || 0;
-        
-        if (isMyTurn) {
+        document.getElementById('current-score').textContent = myScore;
+
+        const isTarget = targetPlayer.name === me;
+        const targetGuesses = (this.gameState.guesses && this.gameState.guesses[targetPlayer.name]) || {};
+        const hasSubmitted = !!targetGuesses[me];
+
+        if (isTarget) {
+            // Target does not guess their own answers
+            document.getElementById('guess-turn-indicator').textContent = `Others are guessing your answers...`;
+            document.getElementById('submit-guesses').style.display = 'none';
+            document.getElementById('waiting-for-guesses').style.display = 'block';
+        } else if (!hasSubmitted) {
+            // I need to submit my guesses for the current target
             document.getElementById('guess-turn-indicator').textContent = 'Your turn to guess!';
             document.getElementById('submit-guesses').style.display = 'block';
             document.getElementById('waiting-for-guesses').style.display = 'none';
+            // Clear any previous selections to avoid accidental carry-over between targets
+            this.questions.forEach((_, index) => {
+                const inputs = document.querySelectorAll(`input[name="guess${index + 1}"]`);
+                inputs.forEach(i => { i.checked = false; });
+            });
         } else {
-            document.getElementById('guess-turn-indicator').textContent = `${currentGuesser.name} is guessing...`;
+            // I already submitted; wait for the rest
+            document.getElementById('guess-turn-indicator').textContent = `Waiting for other players...`;
             document.getElementById('submit-guesses').style.display = 'none';
             document.getElementById('waiting-for-guesses').style.display = 'block';
+        }
+
+        // Update guesses progress text (e.g., "2/3 guesses completed")
+        const submittedCount = Object.keys(targetGuesses).length;
+        const requiredCount = this.gameState.players.length - 1; // everyone except target
+        const guessesProgress = document.getElementById('guesses-progress');
+        if (guessesProgress) {
+            guessesProgress.textContent = `${submittedCount}/${requiredCount} guesses completed`;
         }
     }
 
     async submitGuesses() {
-        const guesses = {};
+        const myGuesses = {};
         this.questions.forEach((question, index) => {
             const selected = document.querySelector(`input[name="guess${index + 1}"]:checked`);
             if (selected) {
-                guesses[question.id] = selected.value;
+                myGuesses[question.id] = selected.value;
             }
         });
-        
-        if (Object.keys(guesses).length !== this.questions.length) {
+
+        if (Object.keys(myGuesses).length !== this.questions.length) {
             this.showError('Please make all guesses before submitting.');
             return;
         }
-        
-        // Calculate score
+
         const targetPlayer = this.gameState.players[this.gameState.currentTarget];
-        const targetAnswers = this.gameState.playerAnswers[targetPlayer.name];
-        let correctGuesses = 0;
-        
-        this.questions.forEach(question => {
-            if (guesses[question.id] === targetAnswers[question.id]) {
-                correctGuesses++;
+        if (!this.gameState.guesses) this.gameState.guesses = {};
+        if (!this.gameState.guesses[targetPlayer.name]) this.gameState.guesses[targetPlayer.name] = {};
+
+        // Save my guesses for the current target
+        this.gameState.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
+
+        // Check if all required guessers (everyone except target) have submitted
+        const submittedCount = Object.keys(this.gameState.guesses[targetPlayer.name]).length;
+        const requiredCount = this.gameState.players.length - 1;
+
+        if (submittedCount >= requiredCount) {
+            // Compute round scores and set reveal object (sync to all)
+            const targetAnswers = this.gameState.playerAnswers[targetPlayer.name];
+            const roundScores = {};
+            for (const [guesserName, guesses] of Object.entries(this.gameState.guesses[targetPlayer.name])) {
+                if (guesserName === targetPlayer.name) continue;
+                let correct = 0;
+                this.questions.forEach(q => {
+                    if (guesses[q.id] === targetAnswers[q.id]) correct++;
+                });
+                const scoreChange = correct - (this.questions.length - correct);
+                roundScores[guesserName] = scoreChange;
             }
-        });
-        
-        // Update score
-        const scoreChange = correctGuesses - (this.questions.length - correctGuesses);
-        this.gameState.scores[this.gameState.playerName] += scoreChange;
-        
-        // Move to next guess
-        this.moveToNextGuess();
-        
+
+            // Apply scores
+            for (const [name, delta] of Object.entries(roundScores)) {
+                this.gameState.scores[name] = (this.gameState.scores[name] || 0) + delta;
+            }
+
+            // Set reveal with a 5-second countdown
+            const durationMs = 5000;
+            const until = Date.now() + durationMs;
+            this.gameState.reveal = {
+                target: targetPlayer.name,
+                answers: targetAnswers,
+                scores: roundScores,
+                until
+            };
+        }
+
         await this.saveGameState();
-        
-        if (this.gameState.phase === 'results') {
-            this.showResults();
+
+        // If a reveal is set, show overlay and schedule host auto-advance
+        if (this.gameState.reveal) {
+            this.showRoundOverlay(this.gameState.reveal);
+            if (this.gameState.isHost) {
+                setTimeout(async () => {
+                    // Only host advances to next target
+                    const targetIdx = this.gameState.currentTarget + 1;
+                    this.gameState.reveal = null; // hide overlay for everyone
+                    this.gameState.currentTarget = targetIdx;
+                    if (this.gameState.currentTarget >= this.gameState.players.length) {
+                        this.gameState.phase = 'results';
+                    }
+                    await this.saveGameState();
+                    if (this.gameState.phase === 'results') {
+                        this.showResults();
+                    }
+                }, Math.max(0, this.gameState.reveal.until - Date.now()));
+            }
         } else {
-            this.updateGuessingPhase();
+            if (this.gameState.phase === 'results') {
+                this.showResults();
+            } else {
+                this.updateGuessingPhase();
+            }
         }
     }
 
     moveToNextGuess() {
-        this.gameState.currentTarget++;
-        
-        if (this.gameState.currentTarget === this.gameState.currentGuesser) {
-            this.gameState.currentTarget++;
-        }
-        
-        if (this.gameState.currentTarget >= this.gameState.players.length) {
-            this.gameState.currentGuesser++;
-            this.gameState.currentTarget = 0;
-            
-            if (this.gameState.currentTarget === this.gameState.currentGuesser) {
-                this.gameState.currentTarget++;
-            }
-        }
-        
-        if (this.gameState.currentGuesser >= this.gameState.players.length) {
-            this.gameState.phase = 'results';
-        }
+        // No-op: replaced by round-based flow handled in submitGuesses()
     }
 
     showResults() {
         this.showPhase('results-phase');
         this.displayResults();
+    }
+
+    // ----- Round Reveal UI -----
+    showRoundOverlay(reveal) {
+        const overlay = document.getElementById('round-overlay');
+        if (!overlay) return;
+
+        // Target name
+        const targetNameEl = document.getElementById('reveal-target-name');
+        if (targetNameEl) targetNameEl.textContent = reveal.target;
+
+        // Actual answers list
+        const answersUl = document.getElementById('reveal-answers-list');
+        if (answersUl) {
+            answersUl.innerHTML = '';
+            this.questions.forEach((q, idx) => {
+                const li = document.createElement('li');
+                li.innerHTML = `<strong>${idx + 1}.</strong> ${reveal.answers[q.id]}`;
+                answersUl.appendChild(li);
+            });
+        }
+
+        // Round scores list
+        const scoresUl = document.getElementById('reveal-scores-list');
+        if (scoresUl) {
+            scoresUl.innerHTML = '';
+            // Show only participants (everyone except target)
+            this.gameState.players.forEach(p => {
+                if (p.name === reveal.target) return;
+                const delta = reveal.scores[p.name] || 0;
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${p.name}</span><span>${delta >= 0 ? '+' : ''}${delta}</span>`;
+                scoresUl.appendChild(li);
+            });
+        }
+
+        // Countdown
+        const countdownEl = document.getElementById('reveal-countdown');
+        if (countdownEl && reveal.until) {
+            const tick = () => {
+                const remaining = Math.max(0, Math.ceil((reveal.until - Date.now()) / 1000));
+                countdownEl.textContent = String(remaining);
+                if (remaining > 0 && this.gameState.reveal) {
+                    this._revealTimer = setTimeout(tick, 250);
+                }
+            };
+            if (this._revealTimer) clearTimeout(this._revealTimer);
+            tick();
+        }
+
+        overlay.style.display = 'flex';
+    }
+
+    hideRoundOverlay() {
+        const overlay = document.getElementById('round-overlay');
+        if (!overlay) return;
+        if (this._revealTimer) clearTimeout(this._revealTimer);
+        overlay.style.display = 'none';
     }
 
     displayResults() {

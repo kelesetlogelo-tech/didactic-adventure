@@ -210,6 +210,25 @@
             </div>
         </div>
 
+        <!-- Round Reveal Overlay (shown between guessing rounds) -->
+        <div id="round-overlay" class="round-overlay" style="display: none;">
+            <div class="round-content">
+                <h2>Round Reveal</h2>
+                <p class="round-subtitle">Actual answers for <strong id="reveal-target-name"></strong></p>
+
+                <div class="reveal-answers">
+                    <ul id="reveal-answers-list"></ul>
+                </div>
+
+                <div class="reveal-scores">
+                    <h3>Scores this round</h3>
+                    <ul id="reveal-scores-list"></ul>
+                </div>
+
+                <p class="countdown">Next round in <span id="reveal-countdown">5</span>…</p>
+            </div>
+        </div>
+
         <!-- Results Phase -->
         <div id="results-phase" class="game-phase">
             <div class="card">
