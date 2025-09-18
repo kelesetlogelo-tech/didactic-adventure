@@ -238,6 +238,9 @@ Just give them the room code: ${this.gameState.roomCode}
                 this.gameState.phase = newState.phase || this.gameState.phase;
                 this.gameState.maxPlayers = newState.maxPlayers || this.gameState.maxPlayers;
                 this.gameState.reveal = newState.reveal || null;
+                this.gameState.guesses = newState.guesses || this.gameState.guesses || {};
+                if (typeof newState.currentTarget === 'number') this.gameState.currentTarget = newState.currentTarget;
+                if (newState.scores) this.gameState.scores = newState.scores;
                 
                 console.log(`👥 Player count: ${oldPlayerCount} -> ${this.gameState.players.length}`);
                 console.log('👑 Is host:', this.gameState.isHost);
@@ -496,11 +499,15 @@ Just give them the room code: ${this.gameState.roomCode}
             document.getElementById('guess-turn-indicator').textContent = 'Your turn to guess!';
             document.getElementById('submit-guesses').style.display = 'block';
             document.getElementById('waiting-for-guesses').style.display = 'none';
-            // Clear any previous selections to avoid accidental carry-over between targets
-            this.questions.forEach((_, index) => {
-                const inputs = document.querySelectorAll(`input[name="guess${index + 1}"]`);
-                inputs.forEach(i => { i.checked = false; });
-            });
+            // Clear selections only when target changes to avoid wiping user choices mid-round
+            const currentTargetName = targetPlayer.name;
+            if (this.lastGuessTargetName !== currentTargetName) {
+                this.questions.forEach((_, index) => {
+                    const inputs = document.querySelectorAll(`input[name="guess${index + 1}"]`);
+                    inputs.forEach(i => { i.checked = false; });
+                });
+                this.lastGuessTargetName = currentTargetName;
+            }
             if (guessQuestions) guessQuestions.style.display = 'block';
         } else {
             // I already submitted; wait for the rest
@@ -534,69 +541,82 @@ Just give them the room code: ${this.gameState.roomCode}
         }
 
         const targetPlayer = this.gameState.players[this.gameState.currentTarget];
-        if (!this.gameState.guesses) this.gameState.guesses = {};
-        if (!this.gameState.guesses[targetPlayer.name]) this.gameState.guesses[targetPlayer.name] = {};
 
-        // Save my guesses for the current target
-        this.gameState.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
+        if (this.firebaseReady && this.gameState.roomCode) {
+            // Use a Firebase transaction to avoid overwriting concurrent guesses/scores
+            await this.database.ref(`games/${this.gameState.roomCode}`).transaction(current => {
+                if (!current) return current;
+                if (!current.guesses) current.guesses = {};
+                if (!current.guesses[targetPlayer.name]) current.guesses[targetPlayer.name] = {};
 
-        // Check if all required guessers (everyone except target) have submitted
-        const submittedCount = Object.keys(this.gameState.guesses[targetPlayer.name]).length;
-        const requiredCount = this.gameState.players.length - 1;
+                // Save my guesses
+                current.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
 
-        if (submittedCount >= requiredCount) {
-            // Compute round scores and set reveal object (sync to all)
-            const targetAnswers = this.gameState.playerAnswers[targetPlayer.name];
-            const roundScores = {};
-            for (const [guesserName, guesses] of Object.entries(this.gameState.guesses[targetPlayer.name])) {
-                if (guesserName === targetPlayer.name) continue;
-                let correct = 0;
-                this.questions.forEach(q => {
-                    if (guesses[q.id] === targetAnswers[q.id]) correct++;
-                });
-                const scoreChange = correct - (this.questions.length - correct);
-                roundScores[guesserName] = scoreChange;
-            }
+                const submittedCount = Object.keys(current.guesses[targetPlayer.name]).length;
+                const requiredCount = (current.players ? current.players.length : this.gameState.players.length) - 1;
 
-            // Apply scores
-            for (const [name, delta] of Object.entries(roundScores)) {
-                this.gameState.scores[name] = (this.gameState.scores[name] || 0) + delta;
-            }
+                if (submittedCount >= requiredCount) {
+                    // Compute and apply round scores
+                    const targetAnswers = (current.playerAnswers && current.playerAnswers[targetPlayer.name]) || this.gameState.playerAnswers[targetPlayer.name];
+                    const roundScores = {};
+                    Object.entries(current.guesses[targetPlayer.name]).forEach(([guesserName, guesses]) => {
+                        if (guesserName === targetPlayer.name) return;
+                        let correct = 0;
+                        this.questions.forEach(q => {
+                            if (guesses[q.id] === targetAnswers[q.id]) correct++;
+                        });
+                        const delta = correct - (this.questions.length - correct);
+                        roundScores[guesserName] = delta;
+                        if (!current.scores) current.scores = {};
+                        current.scores[guesserName] = (current.scores[guesserName] || 0) + delta;
+                    });
 
-            // Set reveal with a 5-second countdown
-            const durationMs = 5000;
-            const until = Date.now() + durationMs;
-            this.gameState.reveal = {
-                target: targetPlayer.name,
-                answers: targetAnswers,
-                scores: roundScores,
-                until
-            };
-        }
+                    // Reveal with countdown
+                    const durationMs = 5000;
+                    const until = Date.now() + durationMs;
+                    current.reveal = {
+                        target: targetPlayer.name,
+                        answers: (targetAnswers || {}),
+                        scores: roundScores,
+                        until
+                    };
+                }
 
-        await this.saveGameState();
+                return current;
+            });
 
-        // If a reveal is set, show overlay and schedule host auto-advance
-        if (this.gameState.reveal) {
-            this.showRoundOverlay(this.gameState.reveal);
-            if (this.gameState.isHost) {
-                setTimeout(async () => {
-                    // Only host advances to next target
-                    const targetIdx = this.gameState.currentTarget + 1;
-                    this.gameState.reveal = null; // hide overlay for everyone
-                    this.gameState.currentTarget = targetIdx;
-                    if (this.gameState.currentTarget >= this.gameState.players.length) {
-                        this.gameState.phase = 'results';
-                    }
-                    await this.saveGameState();
-                    if (this.gameState.phase === 'results') {
-                        this.showResults();
-                    }
-                }, Math.max(0, this.gameState.reveal.until - Date.now()));
-            }
+            // UI updates will be driven by the Firebase listener (show overlay, schedule advance)
         } else {
-            if (this.gameState.phase === 'results') {
-                this.showResults();
+            // Fallback local (no Firebase): previous behavior
+            if (!this.gameState.guesses) this.gameState.guesses = {};
+            if (!this.gameState.guesses[targetPlayer.name]) this.gameState.guesses[targetPlayer.name] = {};
+            this.gameState.guesses[targetPlayer.name][this.gameState.playerName] = myGuesses;
+
+            const submittedCount = Object.keys(this.gameState.guesses[targetPlayer.name]).length;
+            const requiredCount = this.gameState.players.length - 1;
+            if (submittedCount >= requiredCount) {
+                const targetAnswers = this.gameState.playerAnswers[targetPlayer.name];
+                const roundScores = {};
+                for (const [guesserName, guesses] of Object.entries(this.gameState.guesses[targetPlayer.name])) {
+                    if (guesserName === targetPlayer.name) continue;
+                    let correct = 0;
+                    this.questions.forEach(q => {
+                        if (guesses[q.id] === targetAnswers[q.id]) correct++;
+                    });
+                    const delta = correct - (this.questions.length - correct);
+                    roundScores[guesserName] = delta;
+                    this.gameState.scores[guesserName] = (this.gameState.scores[guesserName] || 0) + delta;
+                }
+                const durationMs = 5000;
+                const until = Date.now() + durationMs;
+                this.gameState.reveal = { target: targetPlayer.name, answers: targetAnswers, scores: roundScores, until };
+            }
+
+            await this.saveGameState();
+
+            if (this.gameState.reveal) {
+                this.showRoundOverlay(this.gameState.reveal);
+                this.scheduleAutoAdvanceIfHost();
             } else {
                 this.updateGuessingPhase();
             }
