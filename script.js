@@ -71,18 +71,8 @@ class MultiplayerIfIWereGame {
         this._advanceKey = key;
         const delay = Math.max(0, this.gameState.reveal.until - Date.now());
         if (this._advanceTimer) clearTimeout(this._advanceTimer);
-        this._advanceTimer = setTimeout(async () => {
-            // Guard against reveal being cleared in the meantime
-            if (!this.gameState.reveal) return;
-            this.gameState.reveal = null;
-            this.gameState.currentTarget += 1;
-            if (this.gameState.currentTarget >= this.gameState.players.length) {
-                this.gameState.phase = 'results';
-            }
-            await this.saveGameState();
-            if (this.gameState.phase === 'results') {
-                this.showResults();
-            }
+        this._advanceTimer = setTimeout(() => {
+            this.advanceToNextRound();
         }, delay);
     }
 
@@ -100,12 +90,23 @@ class MultiplayerIfIWereGame {
         document.getElementById('submit-guesses').addEventListener('click', () => this.submitGuesses());
         const continueBtn = document.getElementById('continue-reveal');
         if (continueBtn) {
-            continueBtn.addEventListener('click', () => this.continueRevealNow());
+            continueBtn.addEventListener('click', () => this.advanceToNextRound());
         }
         
         // Results
         document.getElementById('play-again').addEventListener('click', () => this.playAgain());
         document.getElementById('leave-game').addEventListener('click', () => this.leaveGame());
+        const copyBtn = document.getElementById('copy-summary');
+        if (copyBtn) copyBtn.addEventListener('click', () => this.copyWinnerSummary());
+        const muteToggle = document.getElementById('mute-celebrations');
+        if (muteToggle) {
+            // Load persisted setting
+            const persisted = localStorage.getItem('mute_celebrations');
+            if (persisted !== null) muteToggle.checked = persisted === 'true';
+            muteToggle.addEventListener('change', () => {
+                localStorage.setItem('mute_celebrations', String(muteToggle.checked));
+            });
+        }
         
         // Error handling
         document.getElementById('close-error').addEventListener('click', () => this.closeError());
@@ -263,6 +264,9 @@ Just give them the room code: ${this.gameState.roomCode}
                     } else {
                         this.hideRoundOverlay();
                     }
+                } else if (this.gameState.phase === 'results') {
+                    this.hideRoundOverlay();
+                    this.showResults();
                 }
             } else {
                 console.log('❌ No state received from Firebase');
@@ -376,6 +380,65 @@ Just give them the room code: ${this.gameState.roomCode}
         }).catch(() => {
             prompt('Copy this text and share with players:', textToCopy);
         });
+    }
+
+    // Build accuracy summary by target and render into #accuracy-summary
+    renderAccuracySummary() {
+        const wrap = document.getElementById('accuracy-summary');
+        if (!wrap) return;
+        wrap.innerHTML = '';
+        const players = this.gameState.players || [];
+        const guesses = this.gameState.guesses || {};
+        const answers = this.gameState.playerAnswers || {};
+        players.forEach(target => {
+            const targetName = target.name;
+            const targetAnswers = answers[targetName];
+            if (!targetAnswers) return;
+            const group = document.createElement('div');
+            group.className = 'answer-set';
+            const h4 = document.createElement('h4');
+            h4.textContent = `Accuracy when guessing ${targetName}`;
+            group.appendChild(h4);
+            const ul = document.createElement('ul');
+            ul.style.listStyle = 'none';
+            ul.style.padding = '0';
+            const targetGuesses = guesses[targetName] || {};
+            players.forEach(p => {
+                if (p.name === targetName) return; // target doesn't guess
+                const g = targetGuesses[p.name];
+                let correct = 0;
+                if (g) {
+                    this.questions.forEach(q => { if (g[q.id] === targetAnswers[q.id]) correct++; });
+                }
+                const li = document.createElement('li');
+                const total = this.questions.length;
+                li.textContent = `${p.name}: ${correct}/${total} correct`;
+                ul.appendChild(li);
+            });
+            group.appendChild(ul);
+            wrap.appendChild(group);
+        });
+    }
+
+    // Copy a concise summary of winners and final scores
+    async copyWinnerSummary() {
+        const scores = Object.entries(this.gameState.scores || {}).sort(([,a], [,b]) => b - a);
+        const maxScore = scores.length ? scores[0][1] : 0;
+        const winners = scores.filter(([,s]) => s === maxScore).map(([n]) => n);
+        const title = winners.length === 1 ? `Winner: ${winners[0]} (${maxScore} points)` : `Tie: ${winners.join(' & ')} (${maxScore} points)`;
+        const lines = scores.map(([n,s]) => `- ${n}: ${s}`);
+        const text = [`If I Were... Results`, title, ...lines].join('\n');
+        try {
+            await navigator.clipboard.writeText(text);
+            const btn = document.getElementById('copy-summary');
+            if (btn) {
+                const old = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = old, 1500);
+            }
+        } catch (_) {
+            alert(text);
+        }
     }
 
     async startGame() {
@@ -630,6 +693,8 @@ Just give them the room code: ${this.gameState.roomCode}
     showResults() {
         this.showPhase('results-phase');
         this.displayResults();
+        const mute = (document.getElementById('mute-celebrations')?.checked) || localStorage.getItem('mute_celebrations') === 'true';
+        if (!mute) this.triggerFireworks(7000);
     }
 
     // ----- Round Reveal UI -----
@@ -696,15 +761,22 @@ Just give them the room code: ${this.gameState.roomCode}
         overlay.style.display = 'none';
     }
 
-    // Host-only: immediately continue to the next round (advance to next target or results)
-    async continueRevealNow() {
+    // Host-only: advance to the next target or to the results phase
+    async advanceToNextRound() {
         if (!this.gameState.isHost || !this.gameState.reveal) return;
+
+        // Clear any pending timers to prevent double execution
+        if (this._advanceTimer) clearTimeout(this._advanceTimer);
+        this._advanceTimer = null;
+
         this.gameState.reveal = null;
         this.gameState.currentTarget += 1;
         if (this.gameState.currentTarget >= this.gameState.players.length) {
             this.gameState.phase = 'results';
         }
+
         await this.saveGameState();
+
         if (this.gameState.phase === 'results') {
             this.showResults();
         } else {
@@ -713,16 +785,19 @@ Just give them the room code: ${this.gameState.roomCode}
     }
 
     displayResults() {
-        let maxScore = Math.max(...Object.values(this.gameState.scores));
-        let winners = Object.entries(this.gameState.scores)
-            .filter(([name, score]) => score === maxScore)
+        const scores = this.gameState.scores || {};
+        const scoreValues = Object.values(scores);
+        const maxScore = scoreValues.length ? Math.max(...scoreValues) : 0;
+        const winners = Object.entries(scores)
+            .filter(([_, score]) => score === maxScore)
             .map(([name]) => name);
         
         const winnerText = winners.length === 1 
-            ? `🎉 ${winners[0]} wins with ${maxScore} points!`
-            : `🎉 Tie between ${winners.join(' and ')} with ${maxScore} points!`;
+            ? `🎉 Congratulations, ${winners[0]}! You win with ${maxScore} points! 🎆`
+            : `🎉 It's a tie! Congrats to ${winners.join(' and ')} with ${maxScore} points! 🎆`;
         
-        document.getElementById('winner-text').textContent = winnerText;
+        const winnerEl = document.getElementById('winner-text');
+        if (winnerEl) winnerEl.textContent = winnerText;
         
         const scoresList = document.getElementById('scores-list');
         scoresList.innerHTML = '';
@@ -741,6 +816,54 @@ Just give them the room code: ${this.gameState.roomCode}
         });
         
         this.displayAllAnswers();
+
+        // Accuracy summary by target
+        this.renderAccuracySummary();
+    }
+
+    // ----- Fireworks / Confetti -----
+    triggerFireworks(durationMs = 6000) {
+        const container = document.getElementById('fireworks');
+        if (!container) return;
+        container.innerHTML = '';
+        container.style.display = 'block';
+
+        const colors = ['#ff4757', '#ffa502', '#2ed573', '#1e90ff', '#a55eea', '#ff6b81'];
+        const createPiece = () => {
+            const piece = document.createElement('div');
+            piece.className = 'confetti';
+            const size = 8 + Math.random() * 8;
+            piece.style.width = `${size}px`;
+            piece.style.height = `${size * 1.6}px`;
+            piece.style.left = `${Math.random() * 100}%`;
+            piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+            piece.style.animationDuration = `${3 + Math.random() * 3}s`;
+            piece.style.animationDelay = `${Math.random() * 1}s`;
+            piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+            container.appendChild(piece);
+        };
+
+        // spawn bursts
+        const burst = () => {
+            for (let i = 0; i < 30; i++) createPiece();
+        };
+        burst();
+        this._fireworksInterval = setInterval(burst, 1000);
+
+        if (this._fireworksTimeout) clearTimeout(this._fireworksTimeout);
+        this._fireworksTimeout = setTimeout(() => this.stopFireworks(), durationMs);
+    }
+
+    stopFireworks() {
+        const container = document.getElementById('fireworks');
+        if (this._fireworksInterval) clearInterval(this._fireworksInterval);
+        if (this._fireworksTimeout) clearTimeout(this._fireworksTimeout);
+        this._fireworksInterval = null;
+        this._fireworksTimeout = null;
+        if (container) {
+            container.style.display = 'none';
+            container.innerHTML = '';
+        }
     }
 
     displayAllAnswers() {
@@ -767,11 +890,14 @@ Just give them the room code: ${this.gameState.roomCode}
 
     async playAgain() {
         if (this.gameState.isHost) {
+            this.stopFireworks();
             this.gameState.phase = 'waiting-room';
             this.gameState.currentAnswerer = 0;
             this.gameState.currentGuesser = 0;
             this.gameState.currentTarget = 0;
             this.gameState.playerAnswers = {};
+            this.gameState.guesses = {};
+            this.gameState.reveal = null;
             this.gameState.gameStarted = false;
             
             this.gameState.players.forEach(player => {
@@ -798,6 +924,8 @@ Just give them the room code: ${this.gameState.roomCode}
             currentTarget: 0,
             playerAnswers: {},
             scores: {},
+            guesses: {},
+            reveal: null,
             gameStarted: false
         };
     }

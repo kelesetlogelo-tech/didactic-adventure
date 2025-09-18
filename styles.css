@@ -615,6 +615,30 @@ header h1 {
     font-weight: 600;
 }
 
+/* Fireworks / Confetti (Results Celebration) */
+.fireworks {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 900; /* below error overlay (1000) but above page */
+}
+
+.confetti {
+    position: absolute;
+    width: 10px;
+    height: 16px;
+    opacity: 0.9;
+    transform: rotate(0deg);
+    border-radius: 2px;
+    animation: fall linear forwards;
+}
+
+@keyframes fall {
+    0% { transform: translateY(-100vh) rotate(0deg); opacity: 0.9; }
+    100% { transform: translateY(110vh) rotate(720deg); opacity: 0.9; }
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .container {
