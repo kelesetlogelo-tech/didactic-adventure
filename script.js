@@ -63,6 +63,29 @@ class MultiplayerIfIWereGame {
         }
     }
 
+    // Schedule auto-advance (host only) when reveal is active. Idempotent per round.
+    scheduleAutoAdvanceIfHost() {
+        if (!this.gameState.isHost || !this.gameState.reveal) return;
+        const key = `${this.gameState.roomCode}-${this.gameState.currentTarget}-${this.gameState.reveal.until}`;
+        if (this._advanceKey === key) return; // already scheduled for this round
+        this._advanceKey = key;
+        const delay = Math.max(0, this.gameState.reveal.until - Date.now());
+        if (this._advanceTimer) clearTimeout(this._advanceTimer);
+        this._advanceTimer = setTimeout(async () => {
+            // Guard against reveal being cleared in the meantime
+            if (!this.gameState.reveal) return;
+            this.gameState.reveal = null;
+            this.gameState.currentTarget += 1;
+            if (this.gameState.currentTarget >= this.gameState.players.length) {
+                this.gameState.phase = 'results';
+            }
+            await this.saveGameState();
+            if (this.gameState.phase === 'results') {
+                this.showResults();
+            }
+        }, delay);
+    }
+
     initializeEventListeners() {
         // Initial setup
         document.getElementById('create-room').addEventListener('click', () => this.createRoom());
@@ -75,6 +98,10 @@ class MultiplayerIfIWereGame {
         // Game phases
         document.getElementById('submit-answers').addEventListener('click', () => this.submitAnswers());
         document.getElementById('submit-guesses').addEventListener('click', () => this.submitGuesses());
+        const skipBtn = document.getElementById('skip-reveal');
+        if (skipBtn) {
+            skipBtn.addEventListener('click', () => this.skipRevealNow());
+        }
         
         // Results
         document.getElementById('play-again').addEventListener('click', () => this.playAgain());
@@ -228,6 +255,8 @@ Just give them the room code: ${this.gameState.roomCode}
                     this.showGuessingPhase();
                     if (this.gameState.reveal) {
                         this.showRoundOverlay(this.gameState.reveal);
+                        // Ensure host schedules auto-advance even if another player triggered the reveal
+                        this.scheduleAutoAdvanceIfHost();
                     } else {
                         this.hideRoundOverlay();
                     }
@@ -424,6 +453,7 @@ Just give them the room code: ${this.gameState.roomCode}
         this.updateGuessingPhase();
         if (this.gameState.reveal) {
             this.showRoundOverlay(this.gameState.reveal);
+            this.scheduleAutoAdvanceIfHost();
         } else {
             this.hideRoundOverlay();
         }
@@ -447,7 +477,14 @@ Just give them the room code: ${this.gameState.roomCode}
 
         if (isTarget) {
             // Target does not guess their own answers
-            document.getElementById('guess-turn-indicator').textContent = `Others are guessing your answers...`;
+            const pendingNames = this.gameState.players
+                .filter(p => p.name !== targetPlayer.name)
+                .filter(p => !targetGuesses[p.name])
+                .map(p => p.name);
+            const pendingText = pendingNames.length
+                ? `Waiting for: ${pendingNames.join(', ')}`
+                : 'All guesses received.';
+            document.getElementById('guess-turn-indicator').textContent = pendingText;
             document.getElementById('submit-guesses').style.display = 'none';
             document.getElementById('waiting-for-guesses').style.display = 'block';
         } else if (!hasSubmitted) {
@@ -617,6 +654,12 @@ Just give them the room code: ${this.gameState.roomCode}
             tick();
         }
 
+        // Host-only Skip button visibility
+        const skipBtn = document.getElementById('skip-reveal');
+        if (skipBtn) {
+            skipBtn.style.display = this.gameState.isHost ? 'inline-block' : 'none';
+        }
+
         overlay.style.display = 'flex';
     }
 
@@ -625,6 +668,22 @@ Just give them the room code: ${this.gameState.roomCode}
         if (!overlay) return;
         if (this._revealTimer) clearTimeout(this._revealTimer);
         overlay.style.display = 'none';
+    }
+
+    // Host-only: immediately skip the reveal and advance to next target or results
+    async skipRevealNow() {
+        if (!this.gameState.isHost || !this.gameState.reveal) return;
+        this.gameState.reveal = null;
+        this.gameState.currentTarget += 1;
+        if (this.gameState.currentTarget >= this.gameState.players.length) {
+            this.gameState.phase = 'results';
+        }
+        await this.saveGameState();
+        if (this.gameState.phase === 'results') {
+            this.showResults();
+        } else {
+            this.updateGuessingPhase();
+        }
     }
 
     displayResults() {
