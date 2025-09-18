@@ -98,9 +98,9 @@ class MultiplayerIfIWereGame {
         // Game phases
         document.getElementById('submit-answers').addEventListener('click', () => this.submitAnswers());
         document.getElementById('submit-guesses').addEventListener('click', () => this.submitGuesses());
-        const skipBtn = document.getElementById('skip-reveal');
-        if (skipBtn) {
-            skipBtn.addEventListener('click', () => this.skipRevealNow());
+        const continueBtn = document.getElementById('continue-reveal');
+        if (continueBtn) {
+            continueBtn.addEventListener('click', () => this.continueRevealNow());
         }
         
         // Results
@@ -475,6 +475,9 @@ Just give them the room code: ${this.gameState.roomCode}
         const targetGuesses = (this.gameState.guesses && this.gameState.guesses[targetPlayer.name]) || {};
         const hasSubmitted = !!targetGuesses[me];
 
+        // Reference to guess questions container
+        const guessQuestions = document.querySelector('.guess-questions');
+
         if (isTarget) {
             // Target does not guess their own answers
             const pendingNames = this.gameState.players
@@ -487,6 +490,7 @@ Just give them the room code: ${this.gameState.roomCode}
             document.getElementById('guess-turn-indicator').textContent = pendingText;
             document.getElementById('submit-guesses').style.display = 'none';
             document.getElementById('waiting-for-guesses').style.display = 'block';
+            if (guessQuestions) guessQuestions.style.display = 'none';
         } else if (!hasSubmitted) {
             // I need to submit my guesses for the current target
             document.getElementById('guess-turn-indicator').textContent = 'Your turn to guess!';
@@ -497,11 +501,13 @@ Just give them the room code: ${this.gameState.roomCode}
                 const inputs = document.querySelectorAll(`input[name="guess${index + 1}"]`);
                 inputs.forEach(i => { i.checked = false; });
             });
+            if (guessQuestions) guessQuestions.style.display = 'block';
         } else {
             // I already submitted; wait for the rest
             document.getElementById('guess-turn-indicator').textContent = `Waiting for other players...`;
             document.getElementById('submit-guesses').style.display = 'none';
             document.getElementById('waiting-for-guesses').style.display = 'block';
+            if (guessQuestions) guessQuestions.style.display = 'none';
         }
 
         // Update guesses progress text (e.g., "2/3 guesses completed")
@@ -654,10 +660,10 @@ Just give them the room code: ${this.gameState.roomCode}
             tick();
         }
 
-        // Host-only Skip button visibility
-        const skipBtn = document.getElementById('skip-reveal');
-        if (skipBtn) {
-            skipBtn.style.display = this.gameState.isHost ? 'inline-block' : 'none';
+        // Host-only Continue button visibility
+        const continueBtn = document.getElementById('continue-reveal');
+        if (continueBtn) {
+            continueBtn.style.display = this.gameState.isHost ? 'inline-block' : 'none';
         }
 
         overlay.style.display = 'flex';
@@ -670,8 +676,8 @@ Just give them the room code: ${this.gameState.roomCode}
         overlay.style.display = 'none';
     }
 
-    // Host-only: immediately skip the reveal and advance to next target or results
-    async skipRevealNow() {
+    // Host-only: immediately continue to the next round (advance to next target or results)
+    async continueRevealNow() {
         if (!this.gameState.isHost || !this.gameState.reveal) return;
         this.gameState.reveal = null;
         this.gameState.currentTarget += 1;
