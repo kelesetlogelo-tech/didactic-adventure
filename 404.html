@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>If I Were... - Multiplayer Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎭 If I Were...</h1>
+            <p class="subtitle">A fun multiplayer guessing game!</p>
+        </header>
+
+        <!-- The 404 page for GitHub Pages acts as SPA fallback. It is a copy of index.html -->
+        <script>
+            // If opened on the 404 route, force-load the app
+            if (location.pathname !== '/' && !location.pathname.endsWith('/index.html')) {
+                // Let the main app handle routing by redirecting to root
+                location.replace('/');
+            }
+        </script>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

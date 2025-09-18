@@ -1,1 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>If I Were... - Multiplayer Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎭 If I Were...</h1>
+            <p class="subtitle">A fun multiplayer guessing game!</p>
+        </header>
 
+        <!-- Initial Setup Phase -->
+        <div id="initial-setup" class="game-phase active">
+            <div class="card">
+                <h2>Welcome to If I Were...</h2>
+                
+                <!-- Host Game Section -->
+                <div class="setup-option">
+                    <h3>🎮 Host a New Game</h3>
+                    <p>Create a game room for your friends to join</p>
+                    <div class="host-controls">
+                        <label for="player-count">Number of players (2-8):</label>
+                        <select id="player-count">
+                            <option value="2">2 Players</option>
+                            <option value="3">3 Players</option>
+                            <option value="4">4 Players</option>
+                            <option value="5">5 Players</option>
+                            <option value="6">6 Players</option>
+                            <option value="7">7 Players</option>
+                            <option value="8">8 Players</option>
+                        </select>
+                        <input type="text" id="host-name" placeholder="Your name" required>
+                        <button id="create-room" class="btn btn-primary">Create Game Room</button>
+                    </div>
+                </div>
+
+                <div class="divider">OR</div>
+
+                <!-- Join Game Section -->
+                <div class="setup-option">
+                    <h3>🚪 Join Existing Game</h3>
+                    <p>Enter the room code shared by your host</p>
+                    <div class="join-controls">
+                        <input type="text" id="room-code" placeholder="Enter 6-digit room code" maxlength="6">
+                        <input type="text" id="player-name" placeholder="Your name" required>
+                        <button id="join-room" class="btn btn-secondary">Join Game</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Waiting Room Phase -->
+        <div id="waiting-room" class="game-phase">
+            <div class="card">
+                <div class="room-header">
+                    <h2>🎯 Game Room</h2>
+                    <div class="room-code-display">
+                        <span class="room-label">Room Code:</span>
+                        <span id="display-room-code" class="room-code">------</span>
+                        <button id="copy-code" class="btn-copy" title="Copy sharing instructions">📋 Share</button>
+                    </div>
+                    <div class="share-instructions">
+                        <p>📱 <strong>Share this code with players:</strong> <span id="share-room-code" class="highlight-code">------</span></p>
+                        <p class="share-note">Players can join from any device using this code!</p>
+                    </div>
+                </div>
+
+                <div class="waiting-info">
+                    <div class="player-counter">
+                        <span id="joined-count">0</span> of <span id="total-count">0</span> players joined
+                    </div>
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                </div>
+
+                <div class="players-waiting">
+                    <h3>👥 Players in Room:</h3>
+                    <ul id="waiting-players-list"></ul>
+                </div>
+
+                <div id="host-controls" class="host-section" style="display: none;">
+                    <button id="start-game" class="btn btn-success" style="display: none;">🚀 Start Game</button>
+                    <p class="host-note">Waiting for all players to join...</p>
+                </div>
+
+                <div id="player-waiting" class="player-section" style="display: none;">
+                    <p class="waiting-message">⏳ Waiting for host to start the game...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Answer Phase -->
+        <div id="answer-phase" class="game-phase">
+            <div class="card">
+                <h2>Answer the Questions</h2>
+                <div class="game-progress">
+                    <div class="current-player-info">
+                        <span class="your-turn" id="turn-indicator">Your turn!</span>
+                        <span class="player-name" id="current-answerer">You</span>
+                    </div>
+                </div>
+                
+                <div class="questions-container">
+                    <div class="question">
+                        <h3>1. If I were a sound effect, I'd be:</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q1" value="Ka-ching!"> Ka-ching!</label>
+                            <label><input type="radio" name="q1" value="Dramatic gasp"> Dramatic gasp</label>
+                            <label><input type="radio" name="q1" value="Boing!"> Boing!</label>
+                            <label><input type="radio" name="q1" value="Evil laugh"> Evil laugh</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>2. If I were a weather forecast, I'd be:</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q2" value="100% chill"> 100% chill</label>
+                            <label><input type="radio" name="q2" value="Partly dramatic with a chance of chaos!"> Partly dramatic with a chance of chaos!</label>
+                            <label><input type="radio" name="q2" value="Heatwave vibes"> Heatwave vibes</label>
+                            <label><input type="radio" name="q2" value="Sudden tornado of opinions"> Sudden tornado of opinions</label>
+                        </div>
+                    </div>
+
+                    <div class="question">
+                        <h3>3. If I were a breakfast cereal, I'd be:</h3>
+                        <div class="options">
+                            <label><input type="radio" name="q3" value="Jungle Oats"> Jungle Oats</label>
+                            <label><input type="radio" name="q3" value="WeetBix"> WeetBix</label>
+                            <label><input type="radio" name="q3" value="Rice Krispies"> Rice Krispies</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="answer-controls">
+                    <button id="submit-answers" class="btn btn-primary">Submit My Answers</button>
+                </div>
+
+                <div id="waiting-for-others" class="waiting-section" style="display: none;">
+                    <p>✅ Your answers submitted! Waiting for other players...</p>
+                    <div class="waiting-players">
+                        <span id="answers-progress">0/0 players have answered</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Guessing Phase -->
+        <div id="guessing-phase" class="game-phase">
+            <div class="card">
+                <h2>Guess Other Players' Answers</h2>
+                <div class="guessing-info">
+                    <div class="guesser-info">
+                        <span class="your-turn" id="guess-turn-indicator">Your turn to guess!</span>
+                        <span class="score">Score: <span id="current-score">0</span></span>
+                    </div>
+                    <div class="target-info">
+                        <h3>Guess <span id="target-player-name"></span>'s answers:</h3>
+                    </div>
+                </div>
+                
+                <div class="guess-questions">
+                    <div class="guess-question">
+                        <h4>1. If they were a sound effect, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess1" value="Ka-ching!"> Ka-ching!</label>
+                            <label><input type="radio" name="guess1" value="Dramatic gasp"> Dramatic gasp</label>
+                            <label><input type="radio" name="guess1" value="Boing!"> Boing!</label>
+                            <label><input type="radio" name="guess1" value="Evil laugh"> Evil laugh</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>2. If they were a weather forecast, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess2" value="100% chill"> 100% chill</label>
+                            <label><input type="radio" name="guess2" value="Partly dramatic with a chance of chaos!"> Partly dramatic with a chance of chaos!</label>
+                            <label><input type="radio" name="guess2" value="Heatwave vibes"> Heatwave vibes</label>
+                            <label><input type="radio" name="guess2" value="Sudden tornado of opinions"> Sudden tornado of opinions</label>
+                        </div>
+                    </div>
+
+                    <div class="guess-question">
+                        <h4>3. If they were a breakfast cereal, they'd be:</h4>
+                        <div class="options">
+                            <label><input type="radio" name="guess3" value="Jungle Oats"> Jungle Oats</label>
+                            <label><input type="radio" name="guess3" value="WeetBix"> WeetBix</label>
+                            <label><input type="radio" name="guess3" value="Rice Krispies"> Rice Krispies</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="guess-controls">
+                    <button id="submit-guesses" class="btn btn-primary">Submit Guesses</button>
+                </div>
+
+                <div id="waiting-for-guesses" class="waiting-section" style="display: none;">
+                    <p>✅ Your guesses submitted! Waiting for other players...</p>
+                    <div class="guessing-progress">
+                        <span id="guesses-progress">0/0 guesses completed</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results Phase -->
+        <div id="results-phase" class="game-phase">
+            <div class="card">
+                <h2>🏆 Game Results</h2>
+                <div class="winner-announcement">
+                    <h3 id="winner-text"></h3>
+                </div>
+                
+                <div class="final-scores">
+                    <h3>Final Scores:</h3>
+                    <ul id="scores-list"></ul>
+                </div>
+
+                <div class="player-answers">
+                    <h3>Everyone's Answers:</h3>
+                    <div id="all-answers"></div>
+                </div>
+
+                <div class="game-controls">
+                    <button id="play-again" class="btn btn-success">Play Again</button>
+                    <button id="leave-game" class="btn btn-secondary">Leave Game</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Messages -->
+        <div id="error-overlay" class="error-overlay" style="display: none;">
+            <div class="error-content">
+                <h3>⚠️ Error</h3>
+                <p id="error-message"></p>
+                <button id="close-error" class="btn btn-primary">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
