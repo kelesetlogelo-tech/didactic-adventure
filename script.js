@@ -509,6 +509,28 @@ Just give them the room code: ${this.gameState.roomCode}
         const answerPhase = document.getElementById('answer-phase');
         answerPhase.style.display = 'block';
         
+        // Make sure questions are initialized
+        if (!this.questions || this.questions.length === 0) {
+            this.questions = [
+                { 
+                    id: 'q1', 
+                    text: "If I were a sound effect, I'd be:", 
+                    options: ['Ka-ching!', 'Dramatic gasp', 'Boing!', 'Evil laugh'] 
+                },
+                { 
+                    id: 'q2', 
+                    text: "If I were a weather forecast, I'd be:", 
+                    options: ['100% chill', 'Partly dramatic with a chance of chaos!', 'Heatwave vibes', 'Sudden tornado of opinions'] 
+                },
+                { 
+                    id: 'q3', 
+                    text: "If I were a breakfast cereal, I'd be:", 
+                    options: ['Jungle Oats', 'WeetBix', 'Rice Krispies', 'MorVite', 'That weird healthy one no-one eats'] 
+                }
+            ];
+            this.selectedAnswers = new Array(this.questions.length).fill('');
+        }
+        
         // Clear any existing carousel
         const container = document.getElementById('card-carousel-container');
         container.innerHTML = '';
@@ -520,22 +542,20 @@ Just give them the room code: ${this.gameState.roomCode}
             
             // Enable/disable submit button based on whether all questions are answered
             const submitButton = document.getElementById('submit-answers');
-            submitButton.disabled = !this.cardCarousel.getAllQuestionsAnswered();
+            if (submitButton) {
+                submitButton.disabled = !this.cardCarousel.getAllQuestionsAnswered();
+            }
         });
-        
-        // Initialize selected answers array if needed
-        if (!this.selectedAnswers || this.selectedAnswers.length !== this.questions.length) {
-            this.selectedAnswers = new Array(this.questions.length).fill('');
-        }
         
         // Update game state
         this.gameState.gameStarted = true;
         this.gameState.phase = 'answering';
         
         // Update progress counter
-        const answeredCount = Object.keys(this.gameState.playerAnswers).length;
+        const answeredCount = this.gameState.playerAnswers ? Object.keys(this.gameState.playerAnswers).length : 0;
+        const totalPlayers = this.gameState.players ? this.gameState.players.length : 1;
         document.getElementById('answers-progress').textContent = 
-            `${answeredCount}/${this.gameState.players.length} players have answered`;
+            `${answeredCount}/${totalPlayers} players have answered`;
             
         // Disable submit button initially
         const submitButton = document.getElementById('submit-answers');
@@ -636,19 +656,30 @@ Just give them the room code: ${this.gameState.roomCode}
         if (this.isHost) {
             this.initializeGameState();
         }
-    }
-
-    showAnswerPhase() {
-        this.hideAllPhases();
-        document.getElementById('answer-phase').style.display = 'block';
         
-        // Reset the current card index and selected answers
+        // Reset game state
         this.currentCardIndex = 0;
         this.currentQuestionIndex = 0;
-        this.selectedAnswers = [];
+        this.currentRevealIndex = 0;
+        this.playersAnswered = 0;
         
-        // Initialize the question carousel
-        this.initializeQuestionCarousel();
+        // Update the current answerer
+        this.updateCurrentAnswerer();
+        
+        // Initialize the card carousel if it doesn't exist
+        const container = document.getElementById('card-carousel-container');
+        if (container && !this.cardCarousel) {
+            this.cardCarousel = new CardCarousel('card-carousel-container', this.questions, (questionIndex, answer) => {
+                // Update selected answers when user selects an option
+                this.selectedAnswers[questionIndex] = answer;
+                
+                // Enable/disable submit button based on whether all questions are answered
+                const submitButton = document.getElementById('submit-answers');
+                if (submitButton) {
+                    submitButton.disabled = !this.cardCarousel.getAllQuestionsAnswered();
+                }
+            });
+        }
     }
 
     constructor() {
@@ -770,59 +801,6 @@ Just give them the room code: ${this.gameState.roomCode}
         this.selectedAnswers = Array(this.questions.length).fill('');
     }
 
-    startGame() {
-        // Hide all game phases first
-        this.hideAllPhases();
-        
-        // Show the waiting room
-        this.showWaitingRoom();
-        
-        // Set up Firebase listeners
-        this.setupGameListener();
-        
-        // Set up polling fallback
-        this.setupPollingFallback();
-        
-        // Initialize UI elements
-        this.initializeUI();
-        
-        // Initialize the question carousel
-        this.initializeQuestionCarousel();
-        
-        // If this is the host, set up the game state
-        if (this.isHost) {
-            this.initializeGameState();
-        }
-        this.currentCardIndex = 0;
-        
-        // Reset the current question index
-        this.currentQuestionIndex = 0;
-        
-        // Reset the current reveal index
-        this.currentRevealIndex = 0;
-        
-        // Reset the players answered count
-        this.playersAnswered = 0;
-        
-        // Update the current answerer
-        this.updateCurrentAnswerer();
-        
-        // Rebuild the question carousel
-        // Initialize the card carousel if it doesn't exist
-        const container = document.getElementById('card-carousel-container');
-        if (container && !this.cardCarousel) {
-            this.cardCarousel = new CardCarousel('card-carousel-container', this.questions, (questionIndex, answer) => {
-                // Update selected answers when user selects an option
-                this.selectedAnswers[questionIndex] = answer;
-                
-                // Enable/disable submit button based on whether all questions are answered
-                const submitButton = document.getElementById('submit-answers');
-                if (submitButton) {
-                    submitButton.disabled = !this.cardCarousel.getAllQuestionsAnswered();
-                }
-            });
-        }
-    }
 // Initialize the game when the page loads
 window.addEventListener('DOMContentLoaded', () => {
     const game = new MultiplayerIfIWereGame();
