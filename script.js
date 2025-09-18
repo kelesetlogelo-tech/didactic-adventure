@@ -218,7 +218,9 @@ Just give them the room code: ${this.gameState.roomCode}
                     console.log('🏠 Updating waiting room UI');
                     this.updateWaitingRoom();
                 } else if (this.gameState.phase === 'answering') {
-                    this.updateAnswerPhase();
+                    // Important: switch to the Answer phase view first, then update its contents
+                    console.log('📝 Switching to Answer phase (via listener)');
+                    this.showAnswerPhase();
                 } else if (this.gameState.phase === 'guessing') {
                     this.showGuessingPhase();
                 }
